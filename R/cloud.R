@@ -289,34 +289,35 @@ cloud_stop_for_status <- function(response) {
 cloud_check_result <- function(check_log, description, dependency_error) {
   check_dir <- dirname(check_log)
 
+  blank_res <- structure(
+    list(
+      stdout = character(),
+      timeout = FALSE,
+      status = -1L,
+
+      rversion = NA_character_,
+      platform = NA_character_,
+      errors = NA_character_,
+      warnings = NA_character_,
+      notes = NA_character_,
+
+      description = description$str(normalize = FALSE),
+      package     = description$get("Package"),
+      version     = description$get("Version")[[1]],
+      cran        = description$get_field("Repository", "") == "CRAN",
+      bioc        = description$has_fields("biocViews"),
+
+      checkdir    = check_dir,
+      test_fail   = rcmdcheck:::get_test_fail(check_dir),
+      install_out = rcmdcheck:::get_install_out(check_dir),
+
+      type = "cloud"
+    ),
+    class = "rcmdcheck"
+  )
+
   if (!file.exists(check_log)) {
-    return(structure(
-      list(
-        stdout = character(),
-        timeout = FALSE,
-        status = -1L,
-
-        rversion = NA_character_,
-        platform = NA_character_,
-        errors = NA_character_,
-        warnings = NA_character_,
-        notes = NA_character_,
-
-        description = description$str(normalize = FALSE),
-        package     = description$get("Package"),
-        version     = description$get("Version")[[1]],
-        cran        = description$get_field("Repository", "") == "CRAN",
-        bioc        = description$has_fields("biocViews"),
-
-        checkdir    = check_dir,
-        test_fail   = rcmdcheck:::get_test_fail(check_dir),
-        install_out = rcmdcheck:::get_install_out(check_dir),
-
-        type = "cloud"
-        ),
-      class = "rcmdcheck"
-      )
-    )
+    return(blank_res)
   }
 
   stdout <- brio::read_file(check_log)
@@ -325,7 +326,14 @@ cloud_check_result <- function(check_log, description, dependency_error) {
   # Strip \r
   stdout <- gsub("\r\n", "\n", stdout, fixed = TRUE)
 
-  entries <- strsplit(paste0("\n", stdout), "\n\\*+[ ]")[[1]][-1]
+  entries <- tryCatch(
+    strsplit(paste0("\n", stdout), "\n\\*+[ ]")[[1]][-1],
+    error = function(cnd) {
+      rlang::warn(paste("Parsing issue with ", description$get("Package"), ":", cnd))
+      NULL
+    })
+
+  if (is.null(entries)) return(blank_res)
 
   notdone <- function(x) grep("^DONE", x, invert = TRUE, value = TRUE)
 
@@ -527,6 +535,7 @@ cloud_results <- function(job_name = cloud_job(pkg = pkg), pkg = ".") {
   pb <- cli_progress_bar(format = "Processing package results: {pb_percent} ({basename(pkg)})", total = length(pkgs))
   out <- lapply(pkgs, function(pkg) {
     cli_progress_update(id = pb)
+    message(basename(pkg))
     cloud_compare(pkg)
   })
   cli_progress_done(id = pb)
